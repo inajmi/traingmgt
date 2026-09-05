@@ -1,0 +1,222 @@
+// Trainer Tracker schema — PostgreSQL.
+// To run on MariaDB/MySQL, change `provider` to "mysql" below (webinar reminder
+// for: Json/enum differences are handled by Prisma).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TRAINER
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  DISABLED
+}
+
+enum AvailStatus {
+  Available
+  Limited
+  Holiday
+  Unavailable
+}
+
+enum SessionFormat {
+  IN_PERSON
+  ONLINE
+  HYBRID
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  ACCEPTED
+  DECLINED
+}
+
+enum MessageKind {
+  USER
+  SYSTEM_ASSIGNED
+  SYSTEM_ACCEPTED
+  SYSTEM_DECLINED
+  SYSTEM_APPROVED
+  SYSTEM_REJECTED
+  SYSTEM_RESET
+  SYSTEM_REMINDER
+  SYSTEM_SERIES
+  SYSTEM_CANCELLED
+}
+
+model User {
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  passwordHash       String
+  fullName           String
+  phone              String?
+  profession         String?
+  itsId              String?
+  role               Role                @default(TRAINER)
+  status             UserStatus          @default(PENDING)
+  mustChangePassword Boolean             @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  trainer            Trainer?
+  createdSessions    Session[]           @relation("SessionCreator")
+  createdSeries      SessionSeries[]     @relation("SeriesCreator")
+  assignments        SessionTrainer[]    @relation("AssignmentBy")
+  threadParticipants ThreadParticipant[]
+  messages           Message[]
+}
+
+model Trainer {
+  id                    String         @id @default(uuid())
+  userId                String?        @unique
+  itsId                 String?
+  name                  String
+  phone                 String?
+  email                 String?        @unique
+  profession            String?
+  surveyExpertise       String?
+  surveyTopics          String?
+  surveyFormat          String?
+  surveyDayAvailability String?
+  finalTopics           String?
+  preferredFormat       String?
+  preferredDays         String?
+  preferredTime         String?
+  maxSessions           Int?
+  minNotice             String?
+  languages             String?
+  constraints           String?
+  meetingStatus         String?
+  meetingDate           DateTime?      @db.Date
+  willingness           String?
+  freeTraining          String?
+  fee                   String?
+  followUp              String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  user                  User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  availability          Availability[]
+  sessions              SessionTrainer[]
+
+  @@index([email])
+  @@index([userId])
+}
+
+model Availability {
+  id        String     @id @default(uuid())
+  trainerId String
+  year      Int
+  month     String
+  status    AvailStatus
+  trainer   Trainer    @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([trainerId, year, month])
+}
+
+model Session {
+  id              String           @id @default(uuid())
+  title           String
+  topic           String?
+  startsAt        DateTime
+  durationMinutes Int
+  format          SessionFormat    @default(IN_PERSON)
+  venue           String?
+  link            String?
+  notes           String?
+  status          SessionStatus    @default(SCHEDULED)
+  remindedAt      DateTime?
+  seriesId        String?
+  createdById     String
+  createdAt       DateTime         @default(now())
+  creator         User             @relation("SessionCreator", fields: [createdById], references: [id])
+  series          SessionSeries?   @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  trainers        SessionTrainer[]
+  thread          Thread?
+
+  @@index([startsAt])
+  @@index([status])
+  @@index([seriesId])
+}
+
+model SessionSeries {
+  id         String    @id @default(uuid())
+  frequency  String // WEEKLY | MONTHLY
+  interval   Int
+  until      DateTime  @db.Date
+  dayOfWeek  Int?
+  dayOfMonth Int?
+  startAt    DateTime
+  createdById String
+  creator    User      @relation("SeriesCreator", fields: [createdById], references: [id])
+  sessions   Session[]
+
+  @@index([createdById])
+}
+
+model SessionTrainer {
+  id           String           @id @default(uuid())
+  sessionId    String
+  trainerId    String
+  status       AssignmentStatus @default(ASSIGNED)
+  assignedById String
+  respondedAt  DateTime?
+  session      Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  trainer      Trainer          @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  assignedBy   User             @relation("AssignmentBy", fields: [assignedById], references: [id])
+
+  @@unique([sessionId, trainerId])
+  @@index([trainerId])
+}
+
+model Thread {
+  id           String              @id @default(uuid())
+  subject      String?
+  sessionId    String?             @unique
+  session      Session?            @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  participants ThreadParticipant[]
+  messages     Message[]           @relation("ThreadMessages")
+  createdAt    DateTime            @default(now())
+}
+
+model ThreadParticipant {
+  id         String   @id @default(uuid())
+  threadId   String
+  userId     String
+  lastReadAt DateTime?
+  thread     Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id           String      @id @default(uuid())
+  threadId     String
+  senderUserId String?
+  body         String
+  kind         MessageKind @default(USER)
+  thread       Thread      @relation("ThreadMessages", fields: [threadId], references: [id], onDelete: Cascade)
+  sender       User?       @relation(fields: [senderUserId], references: [id])
+  createdAt    DateTime    @default(now())
+
+  @@index([threadId, createdAt])
+}
