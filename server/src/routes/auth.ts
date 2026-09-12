@@ -22,6 +22,12 @@ const BCRYPT_ROUNDS = 11;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Compared against on login when no account matches the email, so an invalid
+// password on a real account and a nonexistent account take about the same
+// time (bcrypt.compare dominates the response time either way) and the two
+// cases can't be told apart by timing.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("not-a-real-account-password", BCRYPT_ROUNDS);
+
 export function serializeUser(user: {
   id: string;
   email: string;
@@ -49,14 +55,21 @@ const registerSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 
+const REGISTER_RESPONSE = { ok: true, message: "If this email is eligible, your registration has been submitted for approval." };
+
 authRouter.post("/register", async (req, res) => {
   try {
     const body = registerSchema.parse(req.body);
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
-    if (existing) throw new HttpError(409, "An account with this email already exists");
+    // Always respond the same way whether or not the email is taken, so
+    // registration can't be used to enumerate accounts.
+    if (existing) {
+      res.status(201).json(REGISTER_RESPONSE);
+      return;
+    }
 
     const passwordHash = await bcrypt.hash(body.password, BCRYPT_ROUNDS);
-    const user = await prisma.user.create({
+    await prisma.user.create({
       data: {
         email: body.email,
         fullName: body.fullName,
@@ -80,10 +93,11 @@ authRouter.post("/register", async (req, res) => {
       );
     }
 
-    res.status(201).json({ ok: true, message: "Registration submitted for approval", userId: user.id });
+    res.status(201).json(REGISTER_RESPONSE);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      error(res, 409, "An account with this email already exists");
+      // Lost a race with a concurrent registration for the same email — same generic response.
+      res.status(201).json(REGISTER_RESPONSE);
       return;
     }
     res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Register failed" });
@@ -106,7 +120,8 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
   try {
     const body = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+    const passwordOk = await bcrypt.compare(body.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+    if (!user || !passwordOk) {
       throw new HttpError(401, "Invalid email or password");
     }
     if (user.status === UserStatus.PENDING) throw new HttpError(403, "Your account is pending admin approval");
