@@ -28,9 +28,9 @@ declare global {
   }
 }
 
-export async function signToken(user: { id: string; role: string }): Promise<string> {
+export async function signToken(user: { id: string; role: string; tokenVersion: number }): Promise<string> {
   const minutes = await getSessionTimeoutMinutes();
-  return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: minutes * 60 });
+  return jwt.sign({ sub: user.id, role: user.role, tokenVersion: user.tokenVersion }, config.jwtSecret, { expiresIn: minutes * 60 });
 }
 
 export async function setAuthCookie(res: Response, token: string): Promise<void> {
@@ -38,7 +38,7 @@ export async function setAuthCookie(res: Response, token: string): Promise<void>
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: false,
+    secure: config.isProduction,
     path: "/",
     maxAge: minutes * 60 * 1000,
   });
@@ -67,6 +67,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const user = await prisma.user.findUnique({ where: { id: payload.sub as string } });
   if (!user) {
     error(res, 401, "Not authenticated");
+    return;
+  }
+  if (typeof payload.tokenVersion !== "number" || payload.tokenVersion !== user.tokenVersion) {
+    error(res, 401, "Your session has expired — please sign in again");
     return;
   }
   const permissions = await getUserPermissions(user.id, user.role);

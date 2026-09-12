@@ -502,7 +502,10 @@ adminRouter.post("/users/:id/reset-password", async (req, res) => {
   }
   const tempPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 11);
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: true } });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash, mustChangePassword: true, tokenVersion: { increment: 1 } },
+  });
   const body = `An admin has reset your password. Your temporary password is: ${tempPassword}   (You will be asked to set a new one on your next sign-in.)`;
   const { emailWarning } = await notifySystem([user.id], body, MessageKind.SYSTEM_RESET, {
     subject: "Password reset",

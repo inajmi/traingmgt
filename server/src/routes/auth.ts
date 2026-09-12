@@ -155,7 +155,14 @@ authRouter.post("/change-password", requireAuth, requireActive, async (req, res)
       throw new HttpError(400, "Current password is incorrect");
     }
     const hash = await bcrypt.hash(body.newPassword, BCRYPT_ROUNDS);
-    await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash, mustChangePassword: false } });
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash, mustChangePassword: false, tokenVersion: { increment: 1 } },
+    });
+    // Bumping tokenVersion invalidates any other outstanding session tokens; re-issue
+    // one for this request so the user making the change stays signed in.
+    const token = await signToken(updated);
+    await setAuthCookie(res, token);
     res.json({ ok: true });
   } catch (err) {
     res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Change failed" });

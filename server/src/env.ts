@@ -16,9 +16,17 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+const INSECURE_JWT_SECRET_DEFAULT = "insecure-dev-secret-change-me";
+const isProduction = process.env.NODE_ENV === "production";
+const jwtSecret = str("JWT_SECRET", INSECURE_JWT_SECRET_DEFAULT);
+
+if (isProduction && jwtSecret === INSECURE_JWT_SECRET_DEFAULT) {
+  throw new Error("JWT_SECRET must be set to a strong, unique value in production (refusing to start with the insecure default).");
+}
+
 export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "",
-  jwtSecret: str("JWT_SECRET", "insecure-dev-secret-change-me"),
+  jwtSecret,
   jwtExpiresIn: str("JWT_EXPIRES_IN", "7d"),
   port: int("PORT", 3000),
   appBaseUrl: str("APP_BASE_URL", "http://localhost:3000"),
@@ -33,5 +41,5 @@ export const config = {
     pass: str("SMTP_PASS", ""),
     from: str("SMTP_FROM", "no-reply@example.com"),
   },
-  isProduction: process.env.NODE_ENV === "production",
+  isProduction,
 };
