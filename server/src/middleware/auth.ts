@@ -102,6 +102,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     return;
   }
   if (req.user.role !== "ADMIN") {
+    console.warn(`[authz] non-admin ${req.user.id} denied ${req.method} ${req.originalUrl}`);
     error(res, 403, "Admins only");
     return;
   }

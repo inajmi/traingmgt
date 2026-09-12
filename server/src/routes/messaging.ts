@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error } from "../lib/http";
+import { error, serverError } from "../lib/http";
 import { ensureThread, postMessage } from "../lib/notify";
 import { requireActive, requireAuth } from "../middleware/auth";
 
@@ -107,7 +107,7 @@ messagingRouter.post("/threads", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Create failed");
+    serverError(res, err, "Create failed");
   }
 });
 
@@ -163,7 +163,7 @@ messagingRouter.post("/threads/:id/messages", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Send failed");
+    serverError(res, err, "Send failed");
   }
 });
 

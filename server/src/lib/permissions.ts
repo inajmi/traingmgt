@@ -67,6 +67,7 @@ export function requirePermission(key: PermissionKey) {
       return;
     }
     if (!req.user.permissions.has(key)) {
+      console.warn(`[authz] user ${req.user.id} denied ${req.method} ${req.originalUrl} (missing ${key})`);
       error(res, 403, "You do not have permission to do this");
       return;
     }

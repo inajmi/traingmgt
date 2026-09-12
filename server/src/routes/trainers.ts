@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error } from "../lib/http";
+import { error, serverError } from "../lib/http";
 import { getAvailabilityYear, putAvailabilityYear, AVAIL_VALUES } from "../lib/availability";
 import { MONTHS, TRAINER_EDITABLE } from "../lib/constants";
 import { serializeTrainer } from "../lib/serialize";
@@ -86,7 +86,7 @@ trainersRouter.put("/me", requireAuth, requireActive, async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Update failed");
+    serverError(res, err, "Update failed");
   }
 });
 
@@ -115,6 +115,6 @@ trainersRouter.put("/me/availability", requireAuth, requireActive, async (req, r
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Save failed");
+    serverError(res, err, "Save failed");
   }
 });

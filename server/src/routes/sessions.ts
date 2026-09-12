@@ -3,7 +3,7 @@ import express from "express";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error, HttpError } from "../lib/http";
+import { error, serverError } from "../lib/http";
 import { EMAIL_NOT_CONFIGURED_MESSAGE, ensureThread, notifySystem, postMessage, sendEmail, sessionParticipants } from "../lib/notify";
 import { requirePermission } from "../lib/permissions";
 import { serializeSession } from "../lib/serialize";
@@ -99,7 +99,7 @@ sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, requirePermis
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Create failed");
+    serverError(res, err, "Create failed");
   }
 });
 
@@ -163,7 +163,7 @@ sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, r
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Assignment failed");
+    serverError(res, err, "Assignment failed");
   }
 });
 
@@ -219,7 +219,7 @@ sessionsRouter.post("/:id/respond", requireAuth, requireActive, async (req, res)
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Respond failed" });
+    serverError(res, err, "Respond failed");
   }
 });
 
@@ -256,7 +256,7 @@ sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, requirePe
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Update failed");
+    serverError(res, err, "Update failed");
   }
 });
 

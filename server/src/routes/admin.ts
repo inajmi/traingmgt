@@ -4,7 +4,7 @@ import express from "express";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error, HttpError } from "../lib/http";
+import { error, HttpError, serverError } from "../lib/http";
 import { AVAIL_VALUES, getAvailabilityYear, putAvailabilityYear } from "../lib/availability";
 import { MEETING_STATUSES, MONTHS, OPEN_TEXT_FIELDS } from "../lib/constants";
 import { notifySystem, sendEmail } from "../lib/notify";
@@ -137,7 +137,7 @@ adminRouter.post("/registrations/:id/approve", async (req, res) => {
       error(res, 409, "Could not link this registration to a trainer profile (possible conflict).");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Approval failed");
+    serverError(res, err, "Approval failed");
   }
 });
 
@@ -160,7 +160,7 @@ adminRouter.post("/registrations/:id/reject", async (req, res) => {
     );
     res.json({ ok: true, user: serializeUser({ ...user, status: UserStatus.REJECTED }), emailWarning });
   } catch (err) {
-    error(res, 500, err instanceof Error ? err.message : "Reject failed");
+    serverError(res, err, "Reject failed");
   }
 });
 
@@ -315,7 +315,7 @@ adminRouter.put("/trainers/:id", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Update failed");
+    serverError(res, err, "Update failed");
   }
 });
 
@@ -355,7 +355,7 @@ adminRouter.put("/trainers/:id/availability", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Save failed");
+    serverError(res, err, "Save failed");
   }
 });
 
@@ -458,7 +458,7 @@ adminRouter.post("/users", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Create failed");
+    serverError(res, err, "Create failed");
   }
 });
 
@@ -490,7 +490,7 @@ adminRouter.put("/users/:id/access-role", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Update failed");
+    serverError(res, err, "Update failed");
   }
 });
 
@@ -569,7 +569,7 @@ adminRouter.put("/settings", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Save failed");
+    serverError(res, err, "Save failed");
   }
 });
 
@@ -594,7 +594,7 @@ adminRouter.post("/settings/test-email", async (req, res) => {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Send failed");
+    serverError(res, err, "Send failed");
   }
 });
 
@@ -646,7 +646,7 @@ adminRouter.post("/roles", async (req, res) => {
       error(res, 409, "A role with that name already exists");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Create failed");
+    serverError(res, err, "Create failed");
   }
 });
 
@@ -681,7 +681,7 @@ adminRouter.put("/roles/:id", async (req, res) => {
       error(res, 409, "A role with that name already exists");
       return;
     }
-    error(res, 500, err instanceof Error ? err.message : "Update failed");
+    serverError(res, err, "Update failed");
   }
 });
 

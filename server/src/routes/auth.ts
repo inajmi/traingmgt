@@ -5,7 +5,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error, HttpError, handleRouteError } from "../lib/http";
+import { error, HttpError, handleRouteError, serverError } from "../lib/http";
 import { notifySystem } from "../lib/notify";
 import { getUserPermissions } from "../lib/permissions";
 import {
@@ -100,7 +100,7 @@ authRouter.post("/register", async (req, res) => {
       res.status(201).json(REGISTER_RESPONSE);
       return;
     }
-    res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Register failed" });
+    serverError(res, err, "Register failed");
   }
 });
 
@@ -122,11 +122,15 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email: body.email } });
     const passwordOk = await bcrypt.compare(body.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
     if (!user || !passwordOk) {
+      console.warn(`[auth] failed login attempt for ${body.email}`);
       throw new HttpError(401, "Invalid email or password");
     }
     if (user.status === UserStatus.PENDING) throw new HttpError(403, "Your account is pending admin approval");
     if (user.status === UserStatus.REJECTED) throw new HttpError(403, "Your registration was not approved");
-    if (user.status === UserStatus.DISABLED) throw new HttpError(403, "Your account is disabled");
+    if (user.status === UserStatus.DISABLED) {
+      console.warn(`[auth] login attempt on disabled account: ${user.email}`);
+      throw new HttpError(403, "Your account is disabled");
+    }
 
     const token = await signToken(user);
     await setAuthCookie(res, token);
@@ -134,7 +138,7 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     const permissions = await getUserPermissions(user.id, user.role);
     res.json({ user: { ...serializeUser(user), permissions: [...permissions] } });
   } catch (err) {
-    res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Login failed" });
+    serverError(res, err, "Login failed");
   }
 });
 
@@ -180,7 +184,7 @@ authRouter.post("/change-password", requireAuth, requireActive, async (req, res)
     await setAuthCookie(res, token);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Change failed" });
+    serverError(res, err, "Change failed");
   }
 });
 

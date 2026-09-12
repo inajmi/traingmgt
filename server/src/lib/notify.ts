@@ -1,6 +1,7 @@
 import { MessageKind, Prisma, Session } from "@prisma/client";
 
 import { prisma } from "../db";
+import { HttpError } from "./http";
 import { getSmtpTransport } from "./settings";
 
 type ThreadWithParticipants = Prisma.ThreadGetPayload<{
@@ -28,7 +29,7 @@ export async function ensureThread(
   opts: { subject?: string; sessionId?: string | null } = {},
 ): Promise<ThreadWithParticipants> {
   const ids = [...new Set(participantUserIds)].filter(Boolean);
-  if (ids.length === 0) throw new Error("Cannot create a thread with no participants");
+  if (ids.length === 0) throw new HttpError(400, "Cannot create a thread with no participants");
 
   if (opts.sessionId) {
     const sessionThread = await prisma.thread.findUnique({

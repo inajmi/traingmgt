@@ -2,6 +2,7 @@ import { MessageKind, SessionFormat, SessionStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 
 import { prisma } from "../db";
+import { HttpError } from "./http";
 import { appTz, fmt } from "./time";
 import { EMAIL_NOT_CONFIGURED_MESSAGE, postMessage, sendEmail, ensureThread } from "./notify";
 
@@ -49,10 +50,10 @@ export function buildOccurrences(base: DateTime, series: SeriesInput): DateTime[
 
 export async function createSession(input: SessionInput, adminId: string): Promise<{ count: number; emailWarning?: string }> {
   const base = DateTime.fromISO(input.startsAt, { zone: appTz() });
-  if (!base.isValid) throw new Error(`Invalid start time: "${input.startsAt}"`);
+  if (!base.isValid) throw new HttpError(400, `Invalid start time: "${input.startsAt}"`);
 
   const occurrences = input.series ? buildOccurrences(base, input.series) : [base];
-  if (occurrences.length === 0) throw new Error("Series produced no occurrences");
+  if (occurrences.length === 0) throw new HttpError(400, "Series produced no occurrences");
 
   const trainers = await prisma.trainer.findMany({
     where: { id: { in: input.trainerIds } },

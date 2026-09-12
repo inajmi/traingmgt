@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 
 import { config } from "./env";
-import { error } from "./lib/http";
+import { error, HttpError, serverError } from "./lib/http";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
 import { messagingRouter } from "./routes/messaging";
@@ -17,6 +17,16 @@ export function buildApp(): express.Express {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  // Baseline hardening headers (OWASP Secure Headers).
+  app.use((_req, res, next) => {
+    res.header("X-Content-Type-Options", "nosniff");
+    res.header("X-Frame-Options", "DENY");
+    res.header("Referrer-Policy", "no-referrer");
+    if (config.isProduction) {
+      res.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    }
+    next();
+  });
   // CORS for separate client deploy.
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "https://training.openexplorer.xyz");
@@ -58,10 +68,21 @@ export function buildApp(): express.Express {
     });
   }
 
-  // Final JSON error handler.
+  // Final JSON error handler. Only status<500 framework errors (e.g. malformed JSON
+  // bodies from express.json()) and our own HttpError get their message shown to the
+  // client — anything else is an unexpected failure, logged server-side only, so
+  // internals (stack traces, file paths, raw db errors) never reach the client.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const status = (err as { status?: number })?.status && (err as { status: number }).status < 500 ? (err as { status: number }).status : 500;
-    error(res, status, (err as Error)?.message ?? "Server error");
+    if (err instanceof HttpError) {
+      error(res, err.status, err.message);
+      return;
+    }
+    const knownStatus = (err as { status?: number })?.status;
+    if (typeof knownStatus === "number" && knownStatus < 500) {
+      error(res, knownStatus, (err as Error)?.message ?? "Bad request");
+      return;
+    }
+    serverError(res, err, "Server error");
   });
 
   return app;
