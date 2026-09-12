@@ -1,4 +1,4 @@
-import { MessageKind, Role, SessionStatus, UserStatus } from "@prisma/client";
+import { MessageKind, PermissionKey, Role, SessionStatus, UserStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import express from "express";
 import { z } from "zod";
@@ -7,8 +7,10 @@ import { prisma } from "../db";
 import { error, HttpError } from "../lib/http";
 import { AVAIL_VALUES, getAvailabilityYear, putAvailabilityYear } from "../lib/availability";
 import { MEETING_STATUSES, MONTHS, OPEN_TEXT_FIELDS } from "../lib/constants";
-import { notifySystem } from "../lib/notify";
+import { notifySystem, sendEmail } from "../lib/notify";
+import { ADMINISTRATOR_ROLE_NAME, PERMISSION_CATALOG, requirePermission } from "../lib/permissions";
 import { serializeTrainer } from "../lib/serialize";
+import { getPublicSettings, updateSettings } from "../lib/settings";
 import { currentYear } from "../lib/time";
 import { requireActive, requireAdmin, requireAuth } from "../middleware/auth";
 import { serializeUser } from "./auth";
@@ -34,6 +36,8 @@ adminRouter.get("/kpis", async (req, res) => {
 });
 
 // ---- Registrations (self-registered trainers awaiting approval) -----------
+
+adminRouter.use("/registrations", requirePermission("REGISTRATIONS_MANAGE"));
 
 adminRouter.get("/registrations", async (req, res) => {
   const filter = String(req.query.filter ?? "pending");
@@ -112,7 +116,7 @@ adminRouter.post("/registrations/:id/approve", async (req, res) => {
     }
 
     await prisma.user.update({ where: { id: user.id }, data: { status: UserStatus.ACTIVE } });
-    await notifySystem([user.id], `Your account has been approved. You can now sign in and start using Trainer Tracker.`, MessageKind.SYSTEM_APPROVED, {
+    const { emailWarning } = await notifySystem([user.id], `Your account has been approved. You can now sign in and start using Trainer Tracker.`, MessageKind.SYSTEM_APPROVED, {
       subject: "Account approved",
       emailTo: [user.email],
     });
@@ -122,6 +126,7 @@ adminRouter.post("/registrations/:id/approve", async (req, res) => {
       user: serializeUser({ ...user, status: UserStatus.ACTIVE }),
       trainerId: trainer.id,
       trainerName: trainer.name,
+      emailWarning,
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -147,19 +152,21 @@ adminRouter.post("/registrations/:id/reject", async (req, res) => {
       return;
     }
     await prisma.user.update({ where: { id: user.id }, data: { status: UserStatus.REJECTED } });
-    await notifySystem(
+    const { emailWarning } = await notifySystem(
       [user.id],
       `Your trainer registration was not approved.${body.reason ? ` Reason: ${body.reason}` : ""} Please contact an admin.`,
       MessageKind.SYSTEM_REJECTED,
       { subject: "Registration update", emailTo: [user.email] },
     );
-    res.json({ ok: true, user: serializeUser({ ...user, status: UserStatus.REJECTED }) });
+    res.json({ ok: true, user: serializeUser({ ...user, status: UserStatus.REJECTED }), emailWarning });
   } catch (err) {
     error(res, 500, err instanceof Error ? err.message : "Reject failed");
   }
 });
 
 // ---- Trainer management ---------------------------------------------------
+
+adminRouter.use("/trainers", requirePermission("TRAINERS_MANAGE"));
 
 adminRouter.get("/trainers", async (req, res) => {
   const q = String(req.query.q ?? "").trim().toLowerCase();
@@ -354,6 +361,139 @@ adminRouter.put("/trainers/:id/availability", async (req, res) => {
 
 // ---- User account management ----------------------------------------------
 
+adminRouter.use("/users", requirePermission("USERS_MANAGE"));
+
+adminRouter.get("/users", async (req, res) => {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { accessRole: { select: { id: true, name: true } } },
+  });
+  res.json({
+    users: users.map((u) => ({
+      ...serializeUser(u),
+      createdAt: u.createdAt.toISOString(),
+      lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
+      accessRole: u.role === Role.ADMIN ? u.accessRole : null,
+    })),
+  });
+});
+
+const createUserSchema = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email(),
+  role: z.enum(["ADMIN", "TRAINER"]),
+  accessRoleId: z.string().trim().min(1).optional(),
+  phone: z.string().trim().max(40).optional().default(""),
+  profession: z.string().trim().max(120).optional().default(""),
+  itsId: z.string().trim().max(40).optional().default(""),
+});
+
+adminRouter.post("/users", async (req, res) => {
+  try {
+    const body = createUserSchema.parse(req.body);
+    const existing = await prisma.user.findUnique({ where: { email: body.email } });
+    if (existing) {
+      error(res, 409, "An account with this email already exists");
+      return;
+    }
+
+    let accessRoleId: string | null = null;
+    if (body.role === "ADMIN") {
+      const accessRole = body.accessRoleId
+        ? await prisma.accessRole.findUnique({ where: { id: body.accessRoleId } })
+        : await prisma.accessRole.findUnique({ where: { name: ADMINISTRATOR_ROLE_NAME } });
+      if (!accessRole) {
+        error(res, 400, "That role does not exist");
+        return;
+      }
+      accessRoleId = accessRole.id;
+    }
+
+    const tempPassword = generateTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 11);
+    const user = await prisma.user.create({
+      data: {
+        email: body.email,
+        fullName: body.fullName,
+        passwordHash,
+        role: body.role,
+        status: UserStatus.ACTIVE,
+        mustChangePassword: true,
+        phone: body.phone || null,
+        profession: body.profession || null,
+        itsId: body.itsId || null,
+        accessRoleId,
+      },
+    });
+
+    if (body.role === "TRAINER") {
+      const unlinked = await prisma.trainer.findFirst({
+        where: { userId: null, email: { equals: user.email, mode: "insensitive" } },
+      });
+      if (unlinked) {
+        await prisma.trainer.update({ where: { id: unlinked.id }, data: { userId: user.id } });
+      } else {
+        await prisma.trainer.create({
+          data: {
+            name: user.fullName,
+            email: user.email,
+            phone: user.phone,
+            profession: user.profession,
+            itsId: user.itsId,
+            userId: user.id,
+          },
+        });
+      }
+    }
+
+    const body2 = `An admin created an account for you. Your temporary password is: ${tempPassword}   (You will be asked to set a new one on your next sign-in.)`;
+    const { emailWarning } = await notifySystem([user.id], body2, MessageKind.SYSTEM_RESET, {
+      subject: "Your Trainer Tracker account",
+      emailTo: [user.email],
+    });
+
+    res.status(201).json({ ok: true, user: serializeUser(user), tempPassword, emailWarning });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Create failed");
+  }
+});
+
+const setAccessRoleSchema = z.object({ accessRoleId: z.string().trim().min(1).nullable() });
+
+adminRouter.put("/users/:id/access-role", async (req, res) => {
+  try {
+    const body = setAccessRoleSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) {
+      error(res, 404, "Account not found");
+      return;
+    }
+    if (user.role !== Role.ADMIN) {
+      error(res, 400, "Only admin-kind accounts can hold a role");
+      return;
+    }
+    if (body.accessRoleId) {
+      const role = await prisma.accessRole.findUnique({ where: { id: body.accessRoleId } });
+      if (!role) {
+        error(res, 400, "That role does not exist");
+        return;
+      }
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { accessRoleId: body.accessRoleId } });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Update failed");
+  }
+});
+
 adminRouter.post("/users/:id/reset-password", async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.params.id } });
   if (!user) {
@@ -364,11 +504,11 @@ adminRouter.post("/users/:id/reset-password", async (req, res) => {
   const passwordHash = await bcrypt.hash(tempPassword, 11);
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: true } });
   const body = `An admin has reset your password. Your temporary password is: ${tempPassword}   (You will be asked to set a new one on your next sign-in.)`;
-  await notifySystem([user.id], body, MessageKind.SYSTEM_RESET, {
+  const { emailWarning } = await notifySystem([user.id], body, MessageKind.SYSTEM_RESET, {
     subject: "Password reset",
     emailTo: [user.email],
   });
-  res.json({ ok: true, tempPassword });
+  res.json({ ok: true, tempPassword, emailWarning });
 });
 
 function generateTempPassword(): string {
@@ -395,5 +535,167 @@ adminRouter.post("/users/:id/enable", async (req, res) => {
     return;
   }
   await prisma.user.update({ where: { id: user.id }, data: { status: UserStatus.ACTIVE } });
+  res.json({ ok: true });
+});
+
+// ---- System settings (email server, login session timeout) ----------------
+
+adminRouter.use("/settings", requirePermission("SETTINGS_MANAGE"));
+
+adminRouter.get("/settings", async (_req, res) => {
+  res.json({ settings: await getPublicSettings() });
+});
+
+const settingsSchema = z.object({
+  smtpHost: z.string().trim().max(200).optional(),
+  smtpPort: z.number().int().min(1).max(65535).optional(),
+  smtpSecure: z.boolean().optional(),
+  smtpUser: z.string().trim().max(200).optional(),
+  smtpFrom: z.string().trim().max(200).optional(),
+  smtpPass: z.string().max(500).optional(),
+  sessionTimeoutMinutes: z.number().int().min(5).max(60 * 24 * 90).optional(),
+});
+
+adminRouter.put("/settings", async (req, res) => {
+  try {
+    const body = settingsSchema.parse(req.body);
+    const settings = await updateSettings(body);
+    res.json({ settings });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Save failed");
+  }
+});
+
+const testEmailSchema = z.object({ to: z.string().trim().toLowerCase().email() });
+
+adminRouter.post("/settings/test-email", async (req, res) => {
+  try {
+    const body = testEmailSchema.parse(req.body);
+    const settings = await getPublicSettings();
+    if (!settings.smtpHost) {
+      error(res, 400, "Configure and save the SMTP host before sending a test email");
+      return;
+    }
+    const result = await sendEmail("Trainer Tracker test email", "This is a test email from Trainer Tracker's system settings page.", [body.to]);
+    if (!result.sent) {
+      error(res, 502, "The mail server rejected the test email — double-check the host, port, and credentials.");
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Send failed");
+  }
+});
+
+// ---- Roles & permissions ----------------------------------------------------
+
+adminRouter.use("/roles", requirePermission("ROLES_MANAGE"));
+
+adminRouter.get("/roles", async (_req, res) => {
+  const roles = await prisma.accessRole.findMany({
+    include: { permissions: true, _count: { select: { users: true } } },
+    orderBy: { name: "asc" },
+  });
+  res.json({
+    roles: roles.map((r) => ({
+      id: r.id,
+      name: r.name,
+      isSystem: r.isSystem,
+      userCount: r._count.users,
+      permissions: r.permissions.map((p) => p.permission),
+    })),
+    catalog: PERMISSION_CATALOG,
+  });
+});
+
+const permissionKeys = PERMISSION_CATALOG.map((p) => p.key) as [PermissionKey, ...PermissionKey[]];
+
+const roleSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  permissions: z.array(z.enum(permissionKeys)).max(permissionKeys.length),
+});
+
+adminRouter.post("/roles", async (req, res) => {
+  try {
+    const body = roleSchema.parse(req.body);
+    const role = await prisma.accessRole.create({
+      data: {
+        name: body.name,
+        permissions: { create: [...new Set(body.permissions)].map((permission) => ({ permission })) },
+      },
+      include: { permissions: true },
+    });
+    res.status(201).json({ role: { id: role.id, name: role.name, isSystem: role.isSystem, permissions: role.permissions.map((p) => p.permission) } });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    if ((err as { code?: string }).code === "P2002") {
+      error(res, 409, "A role with that name already exists");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Create failed");
+  }
+});
+
+adminRouter.put("/roles/:id", async (req, res) => {
+  try {
+    const body = roleSchema.parse(req.body);
+    const role = await prisma.accessRole.findUnique({ where: { id: req.params.id } });
+    if (!role) {
+      error(res, 404, "Role not found");
+      return;
+    }
+    if (role.isSystem) {
+      error(res, 400, "The Administrator role cannot be edited");
+      return;
+    }
+    await prisma.accessRolePermission.deleteMany({ where: { roleId: role.id } });
+    const updated = await prisma.accessRole.update({
+      where: { id: role.id },
+      data: {
+        name: body.name,
+        permissions: { create: [...new Set(body.permissions)].map((permission) => ({ permission })) },
+      },
+      include: { permissions: true },
+    });
+    res.json({ role: { id: updated.id, name: updated.name, isSystem: updated.isSystem, permissions: updated.permissions.map((p) => p.permission) } });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(res, 400, err.issues[0]?.message ?? "Invalid input");
+      return;
+    }
+    if ((err as { code?: string }).code === "P2002") {
+      error(res, 409, "A role with that name already exists");
+      return;
+    }
+    error(res, 500, err instanceof Error ? err.message : "Update failed");
+  }
+});
+
+adminRouter.delete("/roles/:id", async (req, res) => {
+  const role = await prisma.accessRole.findUnique({ where: { id: req.params.id }, include: { _count: { select: { users: true } } } });
+  if (!role) {
+    error(res, 404, "Role not found");
+    return;
+  }
+  if (role.isSystem) {
+    error(res, 400, "The Administrator role cannot be deleted");
+    return;
+  }
+  if (role._count.users > 0) {
+    error(res, 409, `${role._count.users} user(s) still hold this role — reassign them first`);
+    return;
+  }
+  await prisma.accessRole.delete({ where: { id: role.id } });
   res.json({ ok: true });
 });

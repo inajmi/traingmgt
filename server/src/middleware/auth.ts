@@ -1,9 +1,12 @@
+import { PermissionKey } from "@prisma/client";
 import { NextFunction, Request, Response } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 
 import { prisma } from "../db";
 import { config } from "../env";
 import { error } from "../lib/http";
+import { getUserPermissions } from "../lib/permissions";
+import { getSessionTimeoutMinutes } from "../lib/settings";
 
 export const COOKIE_NAME = "tt_token";
 
@@ -13,6 +16,7 @@ export type AuthedUser = {
   fullName: string;
   role: "ADMIN" | "TRAINER";
   status: string;
+  permissions: Set<PermissionKey>;
 };
 
 declare global {
@@ -24,19 +28,19 @@ declare global {
   }
 }
 
-export function signToken(user: { id: string; role: string }): string {
-  return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, {
-    expiresIn: config.jwtExpiresIn as jwt.SignOptions["expiresIn"],
-  });
+export async function signToken(user: { id: string; role: string }): Promise<string> {
+  const minutes = await getSessionTimeoutMinutes();
+  return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: minutes * 60 });
 }
 
-export function setAuthCookie(res: Response, token: string): void {
+export async function setAuthCookie(res: Response, token: string): Promise<void> {
+  const minutes = await getSessionTimeoutMinutes();
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: false,
     path: "/",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: minutes * 60 * 1000,
   });
 }
 
@@ -65,7 +69,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     error(res, 401, "Not authenticated");
     return;
   }
-  req.user = { id: user.id, email: user.email, fullName: user.fullName, role: user.role, status: user.status };
+  const permissions = await getUserPermissions(user.id, user.role);
+  req.user = { id: user.id, email: user.email, fullName: user.fullName, role: user.role, status: user.status, permissions };
   next();
 }
 

@@ -15,6 +15,10 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminRegistrations from "./pages/AdminRegistrations";
 import AdminTrainers from "./pages/AdminTrainers";
 import AdminCalendarPage from "./pages/AdminCalendarPage";
+import AdminSettings from "./pages/AdminSettings";
+import AdminUsers from "./pages/AdminUsers";
+import AdminRoles from "./pages/AdminRoles";
+import { PermissionKey } from "./api/types";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,6 +45,12 @@ function AdminGuard({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function RequirePermission({ permission, children }: { permission: PermissionKey; children: ReactNode }) {
+  const { hasPermission } = useAuth();
+  if (!hasPermission(permission)) return <Navigate to="/admin" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -63,10 +73,31 @@ export default function App() {
         </Route>
         <Route element={<AdminGuard><Outlet /></AdminGuard>}>
           <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/registrations" element={<AdminRegistrations />} />
-          <Route path="/admin/trainers" element={<AdminTrainers />} />
-          <Route path="/admin/calendar" element={<AdminCalendarPage />} />
+          <Route
+            path="/admin/registrations"
+            element={<RequirePermission permission="REGISTRATIONS_MANAGE"><AdminRegistrations /></RequirePermission>}
+          />
+          <Route
+            path="/admin/trainers"
+            element={<RequirePermission permission="TRAINERS_MANAGE"><AdminTrainers /></RequirePermission>}
+          />
+          <Route
+            path="/admin/calendar"
+            element={<RequirePermission permission="SESSIONS_MANAGE"><AdminCalendarPage /></RequirePermission>}
+          />
           <Route path="/admin/inbox" element={<InboxPage />} />
+          <Route
+            path="/admin/users"
+            element={<RequirePermission permission="USERS_MANAGE"><AdminUsers /></RequirePermission>}
+          />
+          <Route
+            path="/admin/roles"
+            element={<RequirePermission permission="ROLES_MANAGE"><AdminRoles /></RequirePermission>}
+          />
+          <Route
+            path="/admin/settings"
+            element={<RequirePermission permission="SETTINGS_MANAGE"><AdminSettings /></RequirePermission>}
+          />
         </Route>
       </Route>
 

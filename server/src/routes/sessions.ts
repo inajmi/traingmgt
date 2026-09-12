@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { prisma } from "../db";
 import { error, HttpError } from "../lib/http";
-import { ensureThread, notifySystem, postMessage, sendEmail, sessionParticipants } from "../lib/notify";
+import { EMAIL_NOT_CONFIGURED_MESSAGE, ensureThread, notifySystem, postMessage, sendEmail, sessionParticipants } from "../lib/notify";
+import { requirePermission } from "../lib/permissions";
 import { serializeSession } from "../lib/serialize";
 import { createSession } from "../lib/sessions";
 import { appTz, fmt } from "../lib/time";
@@ -59,7 +60,7 @@ sessionsRouter.get("/", requireAuth, requireActive, async (req, res) => {
 });
 
 sessionsRouter.get("/:id", requireAuth, requireActive, async (req, res) => {
-  const session = await loadSession(req.params.id);
+  const session = await loadSession(String(req.params.id));
   if (!session) {
     error(res, 404, "Session not found");
     return;
@@ -88,11 +89,11 @@ const createSchema = z.object({
     .optional(),
 });
 
-sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, async (req, res) => {
+sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = createSchema.parse(req.body);
-    const { count } = await createSession(body, req.user!.id);
-    res.status(201).json({ ok: true, created: count });
+    const { count, emailWarning } = await createSession(body, req.user!.id);
+    res.status(201).json({ ok: true, created: count, emailWarning });
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
@@ -106,10 +107,10 @@ sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, async (req, r
 
 const addTrainersSchema = z.object({ trainerIds: z.array(z.string()).min(1).max(100) });
 
-sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, async (req, res) => {
+sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = addTrainersSchema.parse(req.body);
-    const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+    const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
     if (!session) {
       error(res, 404, "Session not found");
       return;
@@ -143,16 +144,20 @@ sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, a
     }
     const { userIds, emails } = await sessionParticipants(full);
     const thread = await getThread(full, userIds);
+    let emailWarning: string | undefined;
     for (const t of trainers) {
       const when = fmt(session.startsAt, "ccc, LLL d, h:mm a");
       const bodyText = `You have been assigned to session "${session.title}" (${when}, ${session.format}${session.venue ? `, ${session.venue}` : ""}). Please accept or decline in My Sessions.`;
       await postMessage(thread.id, { kind: MessageKind.SYSTEM_ASSIGNED, body: bodyText });
-      if (t.user?.email) await sendEmail(`New session assignment: ${session.title}`, bodyText, [t.user.email]);
+      if (t.user?.email) {
+        const result = await sendEmail(`New session assignment: ${session.title}`, bodyText, [t.user.email]);
+        if (!result.sent) emailWarning = result.reason === "not_configured" ? EMAIL_NOT_CONFIGURED_MESSAGE : "One or more assignment emails could not be sent — check the mail server settings.";
+      }
     }
     void emails;
 
     const updated = await loadSession(session.id);
-    res.json({ session: serializeSession(updated as FullSession, { role: "ADMIN", userId: req.user!.id }) });
+    res.json({ session: serializeSession(updated as FullSession, { role: "ADMIN", userId: req.user!.id }), emailWarning });
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
@@ -169,7 +174,7 @@ const respondSchema = z.object({ accepted: z.boolean() });
 sessionsRouter.post("/:id/respond", requireAuth, requireActive, async (req, res) => {
   try {
     const body = respondSchema.parse(req.body);
-    const session = await loadSession(req.params.id);
+    const session = await loadSession(String(req.params.id));
     if (!session) {
       error(res, 404, "Session not found");
       return;
@@ -196,13 +201,19 @@ sessionsRouter.post("/:id/respond", requireAuth, requireActive, async (req, res)
       ? `${who} accepted "${session.title}".`
       : `${who} declined "${session.title}". The admin may assign someone else.`;
     await postMessage(thread.id, { kind: body.accepted ? MessageKind.SYSTEM_ACCEPTED : MessageKind.SYSTEM_DECLINED, body: text });
-    await sendEmail(
-      body.accepted ? `Trainer accepted: ${session.title}` : `Trainer declined: ${session.title}`,
-      text,
-      emails,
-    );
+    let emailWarning: string | undefined;
+    if (emails.length > 0) {
+      const result = await sendEmail(
+        body.accepted ? `Trainer accepted: ${session.title}` : `Trainer declined: ${session.title}`,
+        text,
+        emails,
+      );
+      if (!result.sent) {
+        emailWarning = result.reason === "not_configured" ? EMAIL_NOT_CONFIGURED_MESSAGE : "Notification email could not be sent — check the mail server settings.";
+      }
+    }
 
-    res.json({ ok: true });
+    res.json({ ok: true, emailWarning });
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(res, 400, err.issues[0]?.message ?? "Invalid input");
@@ -225,10 +236,10 @@ const updateSchema = z.object({
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 
-sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, async (req, res) => {
+sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = updateSchema.parse(req.body);
-    const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+    const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
     if (!session) {
       error(res, 404, "Session not found");
       return;
@@ -249,8 +260,8 @@ sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, async (re
   }
 });
 
-sessionsRouter.post("/:id/cancel", requireAuth, requireActive, requireAdmin, async (req, res) => {
-  const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+sessionsRouter.post("/:id/cancel", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
+  const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
   if (!session) {
     error(res, 404, "Session not found");
     return;
@@ -266,7 +277,7 @@ sessionsRouter.post("/:id/cancel", requireAuth, requireActive, requireAdmin, asy
   const thread = await getThread(full, userIds);
   const text = `Session "${session.title}" was cancelled by an admin.`;
   await postMessage(thread.id, { kind: MessageKind.SYSTEM_CANCELLED, body: text });
-  await sendEmail(`Session cancelled: ${session.title}`, text, emails);
+  const result = await sendEmail(`Session cancelled: ${session.title}`, text, emails);
 
-  res.json({ ok: true });
+  res.json({ ok: true, emailWarning: result.sent ? undefined : (result.reason === "not_configured" ? EMAIL_NOT_CONFIGURED_MESSAGE : "Cancellation emails could not be sent — check the mail server settings.") });
 });

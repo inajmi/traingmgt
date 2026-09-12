@@ -1,5 +1,13 @@
 export type Role = "admin" | "trainer";
 
+export type PermissionKey =
+  | "SETTINGS_MANAGE"
+  | "USERS_MANAGE"
+  | "ROLES_MANAGE"
+  | "TRAINERS_MANAGE"
+  | "SESSIONS_MANAGE"
+  | "REGISTRATIONS_MANAGE";
+
 export type User = {
   id: string;
   email: string;
@@ -7,6 +15,41 @@ export type User = {
   role: Role;
   status: string;
   mustChangePassword: boolean;
+  permissions?: PermissionKey[];
+};
+
+export type AccessRoleSummary = { id: string; name: string };
+
+export type StaffUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: Role;
+  status: string;
+  mustChangePassword: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  accessRole: AccessRoleSummary | null;
+};
+
+export type PermissionDef = { key: PermissionKey; label: string; description: string };
+
+export type AccessRoleFull = {
+  id: string;
+  name: string;
+  isSystem: boolean;
+  userCount: number;
+  permissions: PermissionKey[];
+};
+
+export type SystemSettings = {
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpFrom: string;
+  smtpPassSet: boolean;
+  sessionTimeoutMinutes: number;
 };
 
 export type TrainerProfile = {

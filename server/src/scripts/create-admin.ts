@@ -2,6 +2,7 @@ import { Role, UserStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 import { prisma } from "../db";
+import { ensureDefaultAccessRoles } from "../lib/permissions";
 
 // This script is run via `npm run create:admin -w server`, so cwd = server/.
 
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   await prisma.user.create({
     data: { email, fullName: "Administrator", passwordHash, role: Role.ADMIN, status: UserStatus.ACTIVE },
   });
+  await ensureDefaultAccessRoles();
   console.log(`Created admin account: ${email}`);
 }
 

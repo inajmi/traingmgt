@@ -49,7 +49,7 @@ export function buildApp(): express.Express {
   const clientDist = path.resolve(config.clientDist);
   if (fs.existsSync(clientDist)) {
     app.use(express.static(clientDist));
-    app.get("*", (req, res, next) => {
+    app.use((req, res, next) => {
       if (req.path.startsWith("/api/")) {
         next();
         return;

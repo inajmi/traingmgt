@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { AVAIL_COLORS, MONTHS, SessionAdmin, TrainerProfile } from "../api/types";
 import { CalendarEvent, MonthCalendar } from "../components/MonthCalendar";
-import { Drawer, Modal, EmptyState } from "../components/ui";
+import { Drawer, Modal, EmptyState, InlineNotice } from "../components/ui";
 
 const ZONE = "Asia/Dubai";
 const FORMAT_LABELS: Record<string, string> = { IN_PERSON: "In-person", ONLINE: "Online", HYBRID: "Hybrid" };
@@ -52,6 +52,7 @@ export default function AdminCalendarPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createDay, setCreateDay] = useState("");
   const [viewing, setViewing] = useState<SessionAdmin | null>(null);
+  const [pageNotice, setPageNotice] = useState("");
 
   const loadSessions = useCallback(async (cursorDt: DateTime) => {
     const start = cursorDt.startOf("month").minus({ days: 1 }).toISO() ?? "";
@@ -99,6 +100,8 @@ export default function AdminCalendarPage() {
         </button>
       </div>
 
+      {pageNotice && <div className="mb-4"><InlineNotice kind="err">{pageNotice}</InlineNotice></div>}
+
       {loading ? (
         <div className="min-h-[200px] text-sm text-muted">Loading…</div>
       ) : (
@@ -110,8 +113,9 @@ export default function AdminCalendarPage() {
           day={createDay}
           trainers={trainers}
           onClose={() => setCreateOpen(false)}
-          onDone={() => {
+          onDone={(emailWarning) => {
             setCreateOpen(false);
+            setPageNotice(emailWarning ?? "");
             loadSessions(cursor);
           }}
         />
@@ -122,12 +126,14 @@ export default function AdminCalendarPage() {
           session={viewing}
           trainers={trainers}
           onClose={() => setViewing(null)}
-          onSaved={(s) => {
+          onSaved={(s, emailWarning) => {
+            setPageNotice(emailWarning ?? "");
             loadSessions(cursor);
             setViewing(s);
           }}
-          onDeleted={() => {
+          onDeleted={(emailWarning) => {
             setViewing(null);
+            setPageNotice(emailWarning ?? "");
             loadSessions(cursor);
           }}
         />
@@ -136,7 +142,7 @@ export default function AdminCalendarPage() {
   );
 }
 
-function SessionForm({ day, trainers, onClose, onDone }: { day: string; trainers: TrainerRow[]; onClose: () => void; onDone: () => void }) {
+function SessionForm({ day, trainers, onClose, onDone }: { day: string; trainers: TrainerRow[]; onClose: () => void; onDone: (emailWarning?: string) => void }) {
   const [title, setTitle] = useState("");
   const [topic, setTopic] = useState("");
   const [startsAt, setStartsAt] = useState(
@@ -170,7 +176,7 @@ function SessionForm({ day, trainers, onClose, onDone }: { day: string; trainers
     }
     setBusy(true);
     try {
-      await api.post("/sessions", {
+      const d = await api.post<{ emailWarning?: string }>("/sessions", {
         title,
         topic: topic || null,
         startsAt: dt.toISO(),
@@ -182,7 +188,7 @@ function SessionForm({ day, trainers, onClose, onDone }: { day: string; trainers
         trainerIds,
         ...(seriesOn ? { series: { frequency, interval, until } } : {}),
       });
-      onDone();
+      onDone(d.emailWarning);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -282,8 +288,8 @@ function SessionDrawer({
   session: SessionAdmin;
   trainers: TrainerRow[];
   onClose: () => void;
-  onSaved: (s: SessionAdmin) => void;
-  onDeleted: () => void;
+  onSaved: (s: SessionAdmin, emailWarning?: string) => void;
+  onDeleted: (emailWarning?: string) => void;
 }) {
   const [form, setForm] = useState({
     title: session.title,
@@ -314,10 +320,10 @@ function SessionDrawer({
     setBusy(true);
     setErr("");
     try {
-      const d = await api.post<{ session: SessionAdmin }>(`/sessions/${session.id}/trainers`, { trainerIds: addSel });
+      const d = await api.post<{ session: SessionAdmin; emailWarning?: string }>(`/sessions/${session.id}/trainers`, { trainerIds: addSel });
       setAddPicker(false);
       setAddSel([]);
-      onSaved(d.session);
+      onSaved(d.session, d.emailWarning);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -330,8 +336,8 @@ function SessionDrawer({
     setBusy(true);
     setErr("");
     try {
-      await api.post(`/sessions/${session.id}/cancel`);
-      onDeleted();
+      const d = await api.post<{ emailWarning?: string }>(`/sessions/${session.id}/cancel`);
+      onDeleted(d.emailWarning);
     } catch (e) {
       setErr((e as Error).message);
     } finally {

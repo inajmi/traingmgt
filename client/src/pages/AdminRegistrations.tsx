@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 
 import { api } from "../api/client";
-import { Modal, EmptyState } from "../components/ui";
+import { EmptyState, InlineNotice, Modal } from "../components/ui";
 
 type Registration = {
   id: string;
@@ -28,6 +28,7 @@ export default function AdminRegistrations() {
   const [linkedId, setLinkedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [pageNotice, setPageNotice] = useState("");
 
   const load = useCallback(() => {
     api
@@ -51,11 +52,11 @@ export default function AdminRegistrations() {
     setBusy(true);
     setNotice("");
     try {
-      const d = await api.post<{ trainerId: string }>(`/admin/registrations/${approving.id}/approve`, {
+      const d = await api.post<{ trainerId: string; emailWarning?: string }>(`/admin/registrations/${approving.id}/approve`, {
         ...(linkedId ? { linkedTrainerId: linkedId } : {}),
       });
-      setNotice(`Approved and linked to ${d.trainerId ? "a trainer profile" : "a new profile"}. `);
       setApproving(null);
+      setPageNotice(d.emailWarning ?? "");
       load();
     } catch (e) {
       setNotice((e as Error).message);
@@ -68,9 +69,10 @@ export default function AdminRegistrations() {
     if (!rejecting) return;
     setBusy(true);
     try {
-      await api.post(`/admin/registrations/${rejecting.id}/reject`, { reason });
+      const d = await api.post<{ emailWarning?: string }>(`/admin/registrations/${rejecting.id}/reject`, { reason });
       setRejecting(null);
       setReason("");
+      setPageNotice(d.emailWarning ?? "");
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -88,6 +90,8 @@ export default function AdminRegistrations() {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight mb-4">Trainer registrations</h1>
+
+      {pageNotice && <div className="mb-4"><InlineNotice kind="err">{pageNotice}</InlineNotice></div>}
 
       <div className="flex gap-1 mb-4">
         {tabs.map((t) => (

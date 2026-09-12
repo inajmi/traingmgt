@@ -71,7 +71,7 @@ function ChangePasswordScreen() {
 }
 
 function Shell() {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const { unread } = useUnread();
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -83,10 +83,13 @@ function Shell() {
   const nav = isAdmin
     ? [
         { to: "/admin", label: "Admin", end: true },
-        { to: "/admin/registrations", label: "Registrations" },
-        { to: "/admin/trainers", label: "Trainers" },
-        { to: "/admin/calendar", label: "Calendar" },
+        ...(hasPermission("REGISTRATIONS_MANAGE") ? [{ to: "/admin/registrations", label: "Registrations" }] : []),
+        ...(hasPermission("TRAINERS_MANAGE") ? [{ to: "/admin/trainers", label: "Trainers" }] : []),
+        ...(hasPermission("SESSIONS_MANAGE") ? [{ to: "/admin/calendar", label: "Calendar" }] : []),
         { to: "/admin/inbox", label: "Inbox", badge: unread },
+        ...(hasPermission("USERS_MANAGE") ? [{ to: "/admin/users", label: "Users" }] : []),
+        ...(hasPermission("ROLES_MANAGE") ? [{ to: "/admin/roles", label: "Roles" }] : []),
+        ...(hasPermission("SETTINGS_MANAGE") ? [{ to: "/admin/settings", label: "Settings" }] : []),
       ]
     : [
         { to: "/", label: "Dashboard", end: true },

@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 
 import { prisma } from "../db";
 import { appTz, fmt } from "./time";
-import { postMessage, sendEmail, ensureThread } from "./notify";
+import { EMAIL_NOT_CONFIGURED_MESSAGE, postMessage, sendEmail, ensureThread } from "./notify";
 
 export const MAX_SERIES_OCCURRENCES = 100;
 
@@ -47,7 +47,7 @@ export function buildOccurrences(base: DateTime, series: SeriesInput): DateTime[
   return out;
 }
 
-export async function createSession(input: SessionInput, adminId: string): Promise<{ count: number }> {
+export async function createSession(input: SessionInput, adminId: string): Promise<{ count: number; emailWarning?: string }> {
   const base = DateTime.fromISO(input.startsAt, { zone: appTz() });
   if (!base.isValid) throw new Error(`Invalid start time: "${input.startsAt}"`);
 
@@ -59,6 +59,7 @@ export async function createSession(input: SessionInput, adminId: string): Promi
     include: { user: { select: { id: true, email: true, status: true } } },
   });
   const byId = new Map(trainers.map((t) => [t.id, t]));
+  let emailWarning: string | undefined;
 
   // One series row (if recurring) shared by all occurrences.
   let seriesId: string | null = null;
@@ -122,8 +123,13 @@ export async function createSession(input: SessionInput, adminId: string): Promi
     body += " Please accept or decline in My Sessions.";
 
     await postMessage(thread.id, { kind: MessageKind.SYSTEM_ASSIGNED, body });
-    await sendEmail(`New session assignment: ${session.title}`, body, emails);
+    if (emails.length > 0) {
+      const result = await sendEmail(`New session assignment: ${session.title}`, body, emails);
+      if (!result.sent && !emailWarning) {
+        emailWarning = result.reason === "not_configured" ? EMAIL_NOT_CONFIGURED_MESSAGE : "One or more assignment emails could not be sent — check the mail server settings.";
+      }
+    }
   }
 
-  return { count: occurrences.length };
+  return { count: occurrences.length, emailWarning };
 }

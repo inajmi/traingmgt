@@ -1,8 +1,7 @@
 import { MessageKind, Prisma, Session } from "@prisma/client";
-import { createTransport } from "nodemailer";
 
 import { prisma } from "../db";
-import { config } from "../env";
+import { getSmtpTransport } from "./settings";
 
 type ThreadWithParticipants = Prisma.ThreadGetPayload<{
   include: { participants: { select: { userId: true } } };
@@ -103,21 +102,29 @@ export function kindTitle(kind: MessageKind): string {
   }
 }
 
-/** Send a system message to recipient users (inbox + optional email when SMTP configured). */
+export const EMAIL_NOT_CONFIGURED_MESSAGE = "Email was not sent — no mail server is configured in System settings.";
+
+/** Send a system message to recipient users (inbox + optional email when SMTP configured).
+ *  Returns an `emailWarning` when an email was requested but skipped/failed, so callers
+ *  can surface it to the admin who triggered the action instead of failing silently. */
 export async function notifySystem(
   recipientUserIds: string[],
   body: string,
   kind: MessageKind,
   opts: { subject?: string; sessionId?: string | null; emailTo?: string[] } = {},
-): Promise<void> {
+): Promise<{ emailWarning?: string }> {
   const thread = await ensureThread(recipientUserIds, {
     subject: opts.subject,
     sessionId: opts.sessionId ?? null,
   });
   await postMessage(thread.id, { body, kind });
   if (opts.emailTo && opts.emailTo.length > 0) {
-    await sendEmail(kindTitle(kind), body, opts.emailTo);
+    const result = await sendEmail(kindTitle(kind), body, opts.emailTo);
+    if (!result.sent) {
+      return { emailWarning: result.reason === "not_configured" ? EMAIL_NOT_CONFIGURED_MESSAGE : "Email could not be sent — check the mail server settings." };
+    }
   }
+  return {};
 }
 
 /** User ids (with active logins) and their emails attached to a session
@@ -139,28 +146,19 @@ export async function sessionParticipants(session: Session): Promise<{ userIds: 
   return { userIds: [...userIds], emails: [...emails] };
 }
 
-let transporter: ReturnType<typeof createTransport> | null | undefined;
+export type EmailResult = { sent: boolean; reason?: "not_configured" | "error" };
 
-export function smtpConfigured(): boolean {
-  return config.smtp.host !== "";
-}
-
-/** Optional SMTP channel. Safe no-op when SMTP_* is not configured. */
-export async function sendEmail(subject: string, text: string, to: string[]): Promise<void> {
-  if (!smtpConfigured() || to.length === 0) return;
+/** Optional SMTP channel, configured via the admin Settings page. Never throws — callers
+ *  that care whether the email actually went out should check the returned result. */
+export async function sendEmail(subject: string, text: string, to: string[]): Promise<EmailResult> {
+  if (to.length === 0) return { sent: false, reason: "not_configured" };
   try {
-    if (transporter !== null) {
-      if (!transporter) {
-        transporter = createTransport({
-          host: config.smtp.host,
-          port: config.smtp.port,
-          secure: config.smtp.port === 465,
-          auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
-        });
-      }
-      await transporter.sendMail({ from: config.smtp.from, to: to.join(","), subject, text });
-    }
+    const mailer = await getSmtpTransport();
+    if (!mailer) return { sent: false, reason: "not_configured" };
+    await mailer.transport.sendMail({ from: mailer.from, to: to.join(","), subject, text });
+    return { sent: true };
   } catch (err) {
     console.error("[smtp] send failed:", (err as Error).message);
+    return { sent: false, reason: "error" };
   }
 }

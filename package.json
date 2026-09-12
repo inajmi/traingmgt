@@ -17,6 +17,10 @@
   },
   "devDependencies": {
     "@types/luxon": "^3.7.5",
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.2.4"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.4"
   }
 }

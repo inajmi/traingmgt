@@ -60,6 +60,7 @@ export default function AdminTrainers() {
   const [newTrainer, setNewTrainer] = useState({ name: "", email: "", phone: "", profession: "", itsId: "" });
   const [creating, setCreating] = useState(false);
   const [accountMsg, setAccountMsg] = useState("");
+  const [accountWarn, setAccountWarn] = useState(false);
   const [showTemp, setShowTemp] = useState("");
 
   const load = useCallback(() => {
@@ -80,6 +81,7 @@ export default function AdminTrainers() {
     setAvail(t.availability ?? {});
     setNotice("");
     setAccountMsg("");
+    setAccountWarn(false);
     setShowTemp("");
   };
 
@@ -112,12 +114,14 @@ export default function AdminTrainers() {
   const act = async (kind: "reset" | "disable" | "enable") => {
     if (!selected?.account?.id) return;
     setAccountMsg("");
+    setAccountWarn(false);
     setShowTemp("");
     try {
       if (kind === "reset") {
-        const d = await api.post<{ tempPassword: string }>(`/admin/users/${selected.account.id}/reset-password`);
+        const d = await api.post<{ tempPassword: string; emailWarning?: string }>(`/admin/users/${selected.account.id}/reset-password`);
         setShowTemp(d.tempPassword);
-        setAccountMsg("Temporary password generated. It was sent to the trainer's inbox.");
+        setAccountWarn(!!d.emailWarning);
+        setAccountMsg(d.emailWarning ?? "Temporary password generated. It was sent to the trainer's inbox.");
         load();
       } else {
         await api.post(`/admin/users/${selected.account.id}/${kind}`);
@@ -125,6 +129,7 @@ export default function AdminTrainers() {
         load();
       }
     } catch (e) {
+      setAccountWarn(true);
       setAccountMsg((e as Error).message);
     }
   };
@@ -292,7 +297,7 @@ export default function AdminTrainers() {
           ) : (
             <p className="text-sm text-muted">This trainer has no sign-in account yet.</p>
           )}
-          {accountMsg && <p className="text-sm mt-2">{accountMsg.startsWith("Failed") || accountMsg.includes("failed") ? <span className="text-danger">{accountMsg}</span> : <span className="text-[#33623f]">{accountMsg}</span>}</p>}
+          {accountMsg && <p className={`text-sm mt-2 ${accountWarn ? "text-danger" : "text-[#33623f]"}`}>{accountMsg}</p>}
         </Drawer>
       )}
 

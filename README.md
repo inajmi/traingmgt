@@ -7,6 +7,15 @@ series, per-session trainer assignment (accept/decline), and in-app messaging.
 ## Features
 
 - **Roles** — `ADMIN` and `TRAINER`, sign-in via session cookie (`tt_token`, httpOnly, SameSite=Lax).
+  Admin-kind accounts additionally hold a custom **access role** (Settings → Roles) built from a
+  fixed permission catalog (settings, users, roles, trainers, sessions, registrations), so an
+  admin can create restricted staff accounts instead of every admin having full access.
+- **System settings** — an admin with the `settings.manage` permission configures the SMTP email
+  server and the sign-in session timeout from the Settings page; changes apply immediately, no
+  restart required. `SMTP_*` / `JWT_EXPIRES_IN` in `server/.env` only seed the initial values.
+- **User management** — admins with `users.manage` can create accounts directly (staff or
+  trainer, with a temporary password) from the Users page, in addition to approving
+  self-registrations.
 - **Registration** — trainers register with their own password; an admin approves/rejects.
   Approved registrations auto-link to a matching seeded profile (by email) or create a new one.
 - **Profiles** — trainers maintain their profile, preferences, and a 12-month availability grid.
@@ -25,11 +34,11 @@ series, per-session trainer assignment (accept/decline), and in-app messaging.
 
 ## Stack
 
-- Frontend: React 18 + Vite 5 + TypeScript + Tailwind 3 + luxon + react-router 6.
-- Backend: Express 4 + TypeScript, Prisma 5 (PostgreSQL 16; portable to MySQL by changing the
-  provider in `server/prisma/schema.prisma`).
-- Auth: bcrypt + JWT in an httpOnly cookie; `express-rate-limit` on login; zod validation on
-  all bodies.
+- Frontend: React 19 + Vite 8 + TypeScript + Tailwind 4 + luxon + react-router 7.
+- Backend: Express 5 + TypeScript, Prisma 7 (PostgreSQL 16 via `@prisma/adapter-pg`; portable to
+  MySQL by changing the provider in `server/prisma/schema.prisma` and the adapter in `server/src/db.ts`).
+- Auth: bcrypt + JWT in an httpOnly cookie (session timeout configurable in Settings);
+  `express-rate-limit` on login; zod validation on all bodies.
 
 ## Repository layout
 
@@ -42,7 +51,8 @@ trainer-tracker/
     src/                lib/, routes/, middleware/, scripts/create-admin.ts
   client/               Vite + React app
     src/pages/          Login, Register, Dashboard, Profile, Calendar, MySessions,
-                        Inbox, AdminDashboard, AdminRegistrations, AdminTrainers, AdminCalendarPage
+                        Inbox, AdminDashboard, AdminRegistrations, AdminTrainers, AdminCalendarPage,
+                        AdminSettings, AdminUsers, AdminRoles
     src/components/     Shell, MonthCalendar, drawers/modals, form fields
 ```
 
@@ -90,7 +100,8 @@ first sign-in (or set `ADMIN_PASSWORD` before `create:admin`).
 | `CLIENT_DIST`    | `../client/dist` (default)           | Static client build served by Express |
 | `APP_TZ`         | `Asia/Dubai`                         | Display timezone for all datetimes |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | Bootstrap credentials for `create:admin` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | Optional email forwarding (leave blank for in-app only) |
+| `JWT_EXPIRES_IN` | `7d` | Seeds the initial session timeout; edit it in Settings afterwards |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | Seeds the initial email server config; edit it in Settings afterwards |
 
 ## API overview (all under `/api`)
 
@@ -100,7 +111,8 @@ first sign-in (or set `ADMIN_PASSWORD` before `create:admin`).
 - `messaging` — thread list, `/people` picker, messages, read marks
 - `notifications` — unread totals + latest message
 - `admin` — KPIs, registrations (approve/reject), trainer CRUD + availability, account
-  password-reset/disable/enable
+  password-reset/disable/enable, user CRUD + access-role assignment, custom roles CRUD,
+  system settings (SMTP, session timeout)
 
 ## Reminders
 

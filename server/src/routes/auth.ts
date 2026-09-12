@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { error, HttpError, handleRouteError } from "../lib/http";
 import { notifySystem } from "../lib/notify";
+import { getUserPermissions } from "../lib/permissions";
 import {
   clearAuthCookie,
   requireActive,
@@ -112,10 +113,11 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     if (user.status === UserStatus.REJECTED) throw new HttpError(403, "Your registration was not approved");
     if (user.status === UserStatus.DISABLED) throw new HttpError(403, "Your account is disabled");
 
-    const token = signToken(user);
-    setAuthCookie(res, token);
+    const token = await signToken(user);
+    await setAuthCookie(res, token);
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    res.json({ user: serializeUser(user) });
+    const permissions = await getUserPermissions(user.id, user.role);
+    res.json({ user: { ...serializeUser(user), permissions: [...permissions] } });
   } catch (err) {
     res.status(err instanceof HttpError ? err.status : 500).json({ error: err instanceof Error ? err.message : "Login failed" });
   }
@@ -135,7 +137,8 @@ authRouter.get("/me", requireAuth, async (req, res) => {
     error(res, 404, "Account not found");
     return;
   }
-  res.json({ user: serializeUser(full) });
+  const permissions = await getUserPermissions(full.id, full.role);
+  res.json({ user: { ...serializeUser(full), permissions: [...permissions] } });
 });
 
 const changePasswordSchema = z.object({

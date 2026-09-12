@@ -9,7 +9,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -49,6 +48,15 @@ enum AssignmentStatus {
   DECLINED
 }
 
+enum PermissionKey {
+  SETTINGS_MANAGE
+  USERS_MANAGE
+  ROLES_MANAGE
+  TRAINERS_MANAGE
+  SESSIONS_MANAGE
+  REGISTRATIONS_MANAGE
+}
+
 enum MessageKind {
   USER
   SYSTEM_ASSIGNED
@@ -74,14 +82,51 @@ model User {
   status             UserStatus          @default(PENDING)
   mustChangePassword Boolean             @default(false)
   lastLoginAt        DateTime?
+  accessRoleId       String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+  accessRole         AccessRole?         @relation(fields: [accessRoleId], references: [id], onDelete: SetNull)
   trainer            Trainer?
   createdSessions    Session[]           @relation("SessionCreator")
   createdSeries      SessionSeries[]     @relation("SeriesCreator")
   assignments        SessionTrainer[]    @relation("AssignmentBy")
   threadParticipants ThreadParticipant[]
   messages           Message[]
+
+  @@index([accessRoleId])
+}
+
+// Fine-grained capabilities for ADMIN-kind users only; the base Role enum above
+// still gates admin-portal access vs. the trainer experience.
+model AccessRole {
+  id          String                 @id @default(uuid())
+  name        String                 @unique
+  isSystem    Boolean                @default(false)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  permissions AccessRolePermission[]
+  users       User[]
+}
+
+model AccessRolePermission {
+  id         String        @id @default(uuid())
+  roleId     String
+  permission PermissionKey
+  role       AccessRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+}
+
+model SystemSetting {
+  id                    String   @id @default("singleton")
+  smtpHost              String?
+  smtpPort              Int      @default(587)
+  smtpSecure            Boolean  @default(false)
+  smtpUser              String?
+  smtpPassEncrypted     String?
+  smtpFrom              String?
+  sessionTimeoutMinutes Int      @default(10080)
+  updatedAt             DateTime @updatedAt
 }
 
 model Trainer {
