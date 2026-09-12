@@ -12,7 +12,7 @@ type Opts = {
 };
 
 async function request<T>(path: string, opts: Opts = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`https://tracker-server.openexplorer.xyz/api${path}`, {
     method: opts.method ?? "GET",
     credentials: "include",
     headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,

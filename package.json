@@ -16,6 +16,7 @@
     "create:admin": "npm run create:admin -w server"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.5",
     "concurrently": "^9.1.0"
   }
 }
