@@ -7,7 +7,7 @@ import { getAvailabilityYear, putAvailabilityYear, AVAIL_VALUES } from "../lib/a
 import { MONTHS, TRAINER_EDITABLE } from "../lib/constants";
 import { serializeTrainer } from "../lib/serialize";
 import { currentYear } from "../lib/time";
-import { requireActive, requireAuth } from "../middleware/auth";
+import { requireActive, requireAuth, requirePasswordFresh } from "../middleware/auth";
 
 export const trainersRouter = express.Router();
 
@@ -47,7 +47,7 @@ function myTrainer(userId: string) {
   });
 }
 
-trainersRouter.get("/me", requireAuth, requireActive, async (req, res) => {
+trainersRouter.get("/me", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   const trainer = await myTrainer(req.user!.id);
   if (!trainer) {
     if (req.user!.role === "ADMIN") {
@@ -60,7 +60,7 @@ trainersRouter.get("/me", requireAuth, requireActive, async (req, res) => {
   res.json({ trainer: serializeTrainer(trainer, { admin: false }) });
 });
 
-trainersRouter.put("/me", requireAuth, requireActive, async (req, res) => {
+trainersRouter.put("/me", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   try {
     const patch = profilePatchSchema.parse(req.body);
     const trainer = await myTrainer(req.user!.id);
@@ -90,7 +90,7 @@ trainersRouter.put("/me", requireAuth, requireActive, async (req, res) => {
   }
 });
 
-trainersRouter.get("/me/availability", requireAuth, requireActive, async (req, res) => {
+trainersRouter.get("/me/availability", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   const trainer = await prisma.trainer.findUnique({ where: { userId: req.user!.id } });
   if (!trainer) {
     error(res, 404, "Profile not found");
@@ -100,7 +100,7 @@ trainersRouter.get("/me/availability", requireAuth, requireActive, async (req, r
   res.json({ year, entries: await getAvailabilityYear(trainer.id, year) });
 });
 
-trainersRouter.put("/me/availability", requireAuth, requireActive, async (req, res) => {
+trainersRouter.put("/me/availability", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   try {
     const body = availabilityPutSchema.parse(req.body);
     const trainer = await prisma.trainer.findUnique({ where: { userId: req.user!.id } });

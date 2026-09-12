@@ -34,6 +34,11 @@ export const config = {
   adminEmail: str("ADMIN_EMAIL", ""),
   adminPassword: str("ADMIN_PASSWORD", ""),
   clientDist: str("CLIENT_DIST", path.join(process.cwd(), "..", "client", "dist")),
+  // Number of reverse-proxy hops in front of this process (e.g. 1 for a single nginx/ALB).
+  // 0 (default) means "trust nothing" — req.ip is the real socket address, which is what
+  // express-rate-limit keys on; only raise this if that many hops actually sit in front of
+  // the app, or X-Forwarded-For becomes attacker-spoofable and rate limiting is bypassable.
+  trustProxyHops: int("TRUST_PROXY_HOPS", 0),
   smtp: {
     host: str("SMTP_HOST", ""),
     port: int("SMTP_PORT", 587),

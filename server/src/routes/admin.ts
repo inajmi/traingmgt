@@ -12,12 +12,12 @@ import { ADMINISTRATOR_ROLE_NAME, PERMISSION_CATALOG, requirePermission } from "
 import { serializeTrainer } from "../lib/serialize";
 import { getPublicSettings, updateSettings } from "../lib/settings";
 import { currentYear } from "../lib/time";
-import { requireActive, requireAdmin, requireAuth } from "../middleware/auth";
+import { requireActive, requireAdmin, requireAuth, requirePasswordFresh } from "../middleware/auth";
 import { serializeUser } from "./auth";
 
 export const adminRouter = express.Router();
 
-adminRouter.use(requireAuth, requireActive, requireAdmin);
+adminRouter.use(requireAuth, requireActive, requirePasswordFresh, requireAdmin);
 
 // ---- Dashboard KPIs -------------------------------------------------------
 
@@ -91,7 +91,7 @@ adminRouter.post("/registrations/:id/approve", async (req, res) => {
     }
     if (!trainer) {
       trainer = await prisma.trainer.findFirst({
-        where: { userId: null, email: { equals: user.email, mode: "insensitive" } },
+        where: { userId: null, email: user.email },
       });
       if (trainer) {
         const updates: Record<string, unknown> = { userId: user.id };
@@ -177,11 +177,11 @@ adminRouter.get("/trainers", async (req, res) => {
       ...(q
         ? {
             OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { email: { contains: q, mode: "insensitive" } },
-              { profession: { contains: q, mode: "insensitive" } },
-              { surveyExpertise: { contains: q, mode: "insensitive" } },
-              { itsId: { contains: q, mode: "insensitive" } },
+              { name: { contains: q } },
+              { email: { contains: q } },
+              { profession: { contains: q } },
+              { surveyExpertise: { contains: q } },
+              { itsId: { contains: q } },
             ],
           }
         : {}),
@@ -428,7 +428,7 @@ adminRouter.post("/users", async (req, res) => {
 
     if (body.role === "TRAINER") {
       const unlinked = await prisma.trainer.findFirst({
-        where: { userId: null, email: { equals: user.email, mode: "insensitive" } },
+        where: { userId: null, email: user.email },
       });
       if (unlinked) {
         await prisma.trainer.update({ where: { id: unlinked.id }, data: { userId: user.id } });

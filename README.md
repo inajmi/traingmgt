@@ -35,8 +35,7 @@ series, per-session trainer assignment (accept/decline), and in-app messaging.
 ## Stack
 
 - Frontend: React 19 + Vite 8 + TypeScript + Tailwind 4 + luxon + react-router 7.
-- Backend: Express 5 + TypeScript, Prisma 7 (PostgreSQL 16 via `@prisma/adapter-pg`; portable to
-  MySQL by changing the provider in `server/prisma/schema.prisma` and the adapter in `server/src/db.ts`).
+- Backend: Express 5 + TypeScript, Prisma 7 (MySQL 8 via `@prisma/adapter-mariadb`).
 - Auth: bcrypt + JWT in an httpOnly cookie (session timeout configurable in Settings);
   `express-rate-limit` on login; zod validation on all bodies.
 
@@ -45,7 +44,7 @@ series, per-session trainer assignment (accept/decline), and in-app messaging.
 ```
 trainer-tracker/
   package.json          workspace root (dev/build/start/db scripts)
-  docker-compose.yml    optional local PostgreSQL 16
+  docker-compose.yml    optional local MySQL 8
   server/               Express + Prisma API
     prisma/             schema.prisma, migrations, seed (trainers-seed.json is gitignored)
     src/                lib/, routes/, middleware/, scripts/create-admin.ts
@@ -59,14 +58,15 @@ trainer-tracker/
 ## Prerequisites
 
 - Node.js 20+ and npm 10+
-- PostgreSQL 16 reachable at `127.0.0.1:5432` (or use `docker compose up -d`)
+- MySQL 8 reachable at `127.0.0.1:3306` (or use `docker compose up -d`)
 
 ## Setup
 
 ```bash
-# 1. Create the database and a role (adjust to taste)
-sudo -u postgres psql -c "CREATE ROLE trainer LOGIN PASSWORD 'trainer_dev_pass';"
-sudo -u postgres psql -c "CREATE DATABASE trainer_tracker OWNER trainer;"
+# 1. Create the database and a user (adjust to taste)
+mysql -u root -e "CREATE DATABASE trainer_tracker CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -e "CREATE USER 'trainer'@'127.0.0.1' IDENTIFIED BY 'trainer_dev_pass';"
+mysql -u root -e "GRANT ALL PRIVILEGES ON trainer_tracker.* TO 'trainer'@'127.0.0.1';"
 
 # 2. Copy and edit environment variables
 cp server/.env.example server/.env
@@ -94,10 +94,11 @@ first sign-in (or set `ADMIN_PASSWORD` before `create:admin`).
 
 | Variable         | Example                              | Meaning |
 |------------------|--------------------------------------|---------|
-| `DATABASE_URL`   | `postgresql://trainer:***@127.0.0.1:5432/trainer_tracker` | Prisma connection string |
+| `DATABASE_URL`   | `mysql://trainer:***@127.0.0.1:3306/trainer_tracker` | Prisma connection string |
 | `JWT_SECRET`     | random string                        | Signs session cookies |
 | `PORT`           | `3000`                               | API port |
 | `CLIENT_DIST`    | `../client/dist` (default)           | Static client build served by Express |
+| `TRUST_PROXY_HOPS` | `0` (default) | Number of reverse-proxy hops in front of the app; only raise this to match a real deployment topology (e.g. `1` behind a single nginx/ALB) — otherwise `req.ip`, and the login/register/reset rate limiters that key on it, can be spoofed via `X-Forwarded-For` |
 | `APP_TZ`         | `Asia/Dubai`                         | Display timezone for all datetimes |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | Bootstrap credentials for `create:admin` |
 | `JWT_EXPIRES_IN` | `7d` | Seeds the initial session timeout; edit it in Settings afterwards |

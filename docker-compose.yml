@@ -1,27 +1,29 @@
-# Optional local PostgreSQL 16 for Trainer Tracker.
-# Use it with `docker compose up -d`, then run:
-#   sudo -u postgres psql -c "CREATE ROLE trainer LOGIN PASSWORD 'trainer_dev_pass';"  (or exec into the container)
+# Optional local MySQL 8 for Trainer Tracker.
+# Use it with `docker compose up -d` (the image auto-creates the database/user
+# from the env vars below on first start), then run:
 #   npm run db:migrate && npm run db:seed && npm run create:admin
 # The app server itself is not containerized here — deployment is handled by the user.
 
 services:
   db:
-    image: postgres:16
+    image: mysql:8.0
     container_name: trainer-tracker-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: trainer
-      POSTGRES_PASSWORD: trainer_dev_pass
-      POSTGRES_DB: trainer_tracker
+      MYSQL_ROOT_PASSWORD: trainer_dev_root_pass
+      MYSQL_DATABASE: trainer_tracker
+      MYSQL_USER: trainer
+      MYSQL_PASSWORD: trainer_dev_pass
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - trainer_tracker_pgdata:/var/lib/postgresql/data
+      - trainer_tracker_mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trainer -d trainer_tracker"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u trainer --password=trainer_dev_pass"]
       interval: 5s
       timeout: 3s
       retries: 10
 
 volumes:
-  trainer_tracker_pgdata:
+  trainer_tracker_mysqldata:

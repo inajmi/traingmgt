@@ -7,7 +7,7 @@ COPY prisma ./prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 COPY . .
 RUN npm run build
-ENV DATABASE_URL="postgresql://trainer:trainer_dev_pass@host.docker.internal:5432/trainer_tracker"
+ENV DATABASE_URL="mysql://trainer:trainer_dev_pass@host.docker.internal:3306/trainer_tracker"
 ENV JWT_SECRET="change-me-to-a-long-random-string"
 ENV PORT=3000
 ENV NODE_ENV=production

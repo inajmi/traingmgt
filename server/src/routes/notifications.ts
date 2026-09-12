@@ -1,12 +1,12 @@
 import express from "express";
 
 import { prisma } from "../db";
-import { requireActive, requireAuth } from "../middleware/auth";
+import { requireActive, requireAuth, requirePasswordFresh } from "../middleware/auth";
 import { listThreadsFor } from "./messaging";
 
 export const notificationsRouter = express.Router();
 
-notificationsRouter.use(requireAuth, requireActive);
+notificationsRouter.use(requireAuth, requireActive, requirePasswordFresh);
 
 notificationsRouter.get("/", async (req, res) => {
   const threads = await listThreadsFor(req.user!.id);

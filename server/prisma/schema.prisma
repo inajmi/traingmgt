@@ -1,6 +1,4 @@
-// Trainer Tracker schema — PostgreSQL.
-// To run on MariaDB/MySQL, change `provider` to "mysql" below (webinar reminder
-// for: Json/enum differences are handled by Prisma).
+// Trainer Tracker schema — MySQL.
 
 generator client {
   provider      = "prisma-client-js"
@@ -8,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
 }
 
 enum Role {
@@ -124,7 +122,7 @@ model SystemSetting {
   smtpPort              Int      @default(587)
   smtpSecure            Boolean  @default(false)
   smtpUser              String?
-  smtpPassEncrypted     String?
+  smtpPassEncrypted     String?  @db.Text
   smtpFrom              String?
   sessionTimeoutMinutes Int      @default(10080)
   updatedAt             DateTime @updatedAt
@@ -138,24 +136,24 @@ model Trainer {
   phone                 String?
   email                 String?          @unique
   profession            String?
-  surveyExpertise       String?
-  surveyTopics          String?
-  surveyFormat          String?
-  surveyDayAvailability String?
-  finalTopics           String?
-  preferredFormat       String?
-  preferredDays         String?
-  preferredTime         String?
+  surveyExpertise       String?          @db.Text
+  surveyTopics          String?          @db.Text
+  surveyFormat          String?          @db.Text
+  surveyDayAvailability String?          @db.Text
+  finalTopics           String?          @db.Text
+  preferredFormat       String?          @db.Text
+  preferredDays         String?          @db.Text
+  preferredTime         String?          @db.Text
   maxSessions           Int?
-  minNotice             String?
-  languages             String?
-  constraints           String?
+  minNotice             String?          @db.Text
+  languages             String?          @db.Text
+  constraints           String?          @db.Text
   meetingStatus         String?
   meetingDate           DateTime?        @db.Date
-  willingness           String?
-  freeTraining          String?
+  willingness           String?          @db.Text
+  freeTraining          String?          @db.Text
   fee                   String?
-  followUp              String?
+  followUp              String?          @db.Text
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
   user                  User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -181,13 +179,13 @@ model Availability {
 model Session {
   id              String           @id @default(uuid())
   title           String
-  topic           String?
+  topic           String?          @db.Text
   startsAt        DateTime
   durationMinutes Int
   format          SessionFormat    @default(IN_PERSON)
   venue           String?
-  link            String?
-  notes           String?
+  link            String?          @db.Text
+  notes           String?          @db.Text
   status          SessionStatus    @default(SCHEDULED)
   remindedAt      DateTime?
   seriesId        String?
@@ -235,7 +233,7 @@ model SessionTrainer {
 
 model Thread {
   id           String              @id @default(uuid())
-  subject      String?
+  subject      String?             @db.Text
   sessionId    String?             @unique
   session      Session?            @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   participants ThreadParticipant[]
@@ -259,7 +257,7 @@ model Message {
   id           String      @id @default(uuid())
   threadId     String
   senderUserId String?
-  body         String
+  body         String      @db.Text
   kind         MessageKind @default(USER)
   thread       Thread      @relation("ThreadMessages", fields: [threadId], references: [id], onDelete: Cascade)
   sender       User?       @relation(fields: [senderUserId], references: [id])

@@ -9,7 +9,7 @@ import { requirePermission } from "../lib/permissions";
 import { serializeSession } from "../lib/serialize";
 import { createSession } from "../lib/sessions";
 import { appTz, fmt } from "../lib/time";
-import { requireActive, requireAdmin, requireAuth } from "../middleware/auth";
+import { requireActive, requireAdmin, requireAuth, requirePasswordFresh } from "../middleware/auth";
 import { DateTime } from "luxon";
 
 export const sessionsRouter = express.Router();
@@ -29,9 +29,25 @@ async function getThread(session: FullSession, userIds: string[]) {
   return ensureThread(userIds, { subject: `Session: ${session.title}`, sessionId: session.id });
 }
 
+// A non-admin may only see sessions they created or are assigned to — never
+// the full org-wide calendar (which can carry other trainers' confidential
+// notes/links). Admins are unrestricted.
+function visibilityWhere(viewer: { role: "ADMIN" | "TRAINER"; userId: string }) {
+  if (viewer.role === "ADMIN") return {};
+  return {
+    OR: [{ createdById: viewer.userId }, { trainers: { some: { trainer: { userId: viewer.userId } } } }],
+  };
+}
+
+function isVisibleTo(session: FullSession, viewer: { role: "ADMIN" | "TRAINER"; userId: string }): boolean {
+  if (viewer.role === "ADMIN") return true;
+  if (session.createdById === viewer.userId) return true;
+  return session.trainers.some((st) => st.trainer.userId === viewer.userId);
+}
+
 // ---- List / calendar ------------------------------------------------------
 
-sessionsRouter.get("/", requireAuth, requireActive, async (req, res) => {
+sessionsRouter.get("/", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   const role = req.user!.role;
   const now = new Date();
   const defaultStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -49,7 +65,7 @@ sessionsRouter.get("/", requireAuth, requireActive, async (req, res) => {
   }
 
   const sessions = await prisma.session.findMany({
-    where: { startsAt: { gte: start, lte: end } },
+    where: { startsAt: { gte: start, lte: end }, ...visibilityWhere({ role, userId: req.user!.id }) },
     include: sessionInclude,
     orderBy: { startsAt: "asc" },
   });
@@ -59,13 +75,16 @@ sessionsRouter.get("/", requireAuth, requireActive, async (req, res) => {
   });
 });
 
-sessionsRouter.get("/:id", requireAuth, requireActive, async (req, res) => {
+sessionsRouter.get("/:id", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   const session = await loadSession(String(req.params.id));
-  if (!session) {
+  const viewer = { role: req.user!.role, userId: req.user!.id };
+  // Same 404 whether the session doesn't exist or the viewer can't see it —
+  // don't give an unauthorized caller an oracle for which session IDs exist.
+  if (!session || !isVisibleTo(session as FullSession, viewer)) {
     error(res, 404, "Session not found");
     return;
   }
-  res.json({ session: serializeSession(session as FullSession, { role: req.user!.role, userId: req.user!.id }) });
+  res.json({ session: serializeSession(session as FullSession, viewer) });
 });
 
 // ---- Create (admin) -------------------------------------------------------
@@ -89,7 +108,7 @@ const createSchema = z.object({
     .optional(),
 });
 
-sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
+sessionsRouter.post("/", requireAuth, requireActive, requirePasswordFresh, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = createSchema.parse(req.body);
     const { count, emailWarning } = await createSession(body, req.user!.id);
@@ -107,7 +126,7 @@ sessionsRouter.post("/", requireAuth, requireActive, requireAdmin, requirePermis
 
 const addTrainersSchema = z.object({ trainerIds: z.array(z.string()).min(1).max(100) });
 
-sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
+sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requirePasswordFresh, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = addTrainersSchema.parse(req.body);
     const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
@@ -171,7 +190,7 @@ sessionsRouter.post("/:id/trainers", requireAuth, requireActive, requireAdmin, r
 
 const respondSchema = z.object({ accepted: z.boolean() });
 
-sessionsRouter.post("/:id/respond", requireAuth, requireActive, async (req, res) => {
+sessionsRouter.post("/:id/respond", requireAuth, requireActive, requirePasswordFresh, async (req, res) => {
   try {
     const body = respondSchema.parse(req.body);
     const session = await loadSession(String(req.params.id));
@@ -236,7 +255,7 @@ const updateSchema = z.object({
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 
-sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
+sessionsRouter.patch("/:id", requireAuth, requireActive, requirePasswordFresh, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   try {
     const body = updateSchema.parse(req.body);
     const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
@@ -260,7 +279,7 @@ sessionsRouter.patch("/:id", requireAuth, requireActive, requireAdmin, requirePe
   }
 });
 
-sessionsRouter.post("/:id/cancel", requireAuth, requireActive, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
+sessionsRouter.post("/:id/cancel", requireAuth, requireActive, requirePasswordFresh, requireAdmin, requirePermission("SESSIONS_MANAGE"), async (req, res) => {
   const session = await prisma.session.findUnique({ where: { id: String(req.params.id) } });
   if (!session) {
     error(res, 404, "Session not found");

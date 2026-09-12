@@ -4,11 +4,11 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { error, serverError } from "../lib/http";
 import { ensureThread, postMessage } from "../lib/notify";
-import { requireActive, requireAuth } from "../middleware/auth";
+import { requireActive, requireAuth, requirePasswordFresh } from "../middleware/auth";
 
 export const messagingRouter = express.Router();
 
-messagingRouter.use(requireAuth, requireActive);
+messagingRouter.use(requireAuth, requireActive, requirePasswordFresh);
 
 export type ThreadListItem = {
   id: string;

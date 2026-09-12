@@ -1,8 +1,8 @@
-import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "@prisma/client";
 
 import { config } from "./env";
 
-const adapter = new PrismaPg({ connectionString: config.databaseUrl });
+const adapter = new PrismaMariaDb(config.databaseUrl);
 
 export const prisma = new PrismaClient({ adapter });

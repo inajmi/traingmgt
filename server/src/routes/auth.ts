@@ -5,7 +5,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 
 import { prisma } from "../db";
-import { error, HttpError, handleRouteError, serverError } from "../lib/http";
+import { error, HttpError, handleRouteError } from "../lib/http";
 import { notifySystem } from "../lib/notify";
 import { getUserPermissions } from "../lib/permissions";
 import {
@@ -27,6 +27,21 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // time (bcrypt.compare dominates the response time either way) and the two
 // cases can't be told apart by timing.
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync("not-a-real-account-password", BCRYPT_ROUNDS);
+
+function makeLimiter(limit: number) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+  });
+}
+
+const loginLimiter = makeLimiter(20);
+// Stricter than login: these are rarely-legitimate-repeated actions, and register
+// additionally runs a bcrypt(cost=11) hash + DB write per unauthenticated request.
+const registerLimiter = makeLimiter(10);
+const requestResetLimiter = makeLimiter(10);
 
 export function serializeUser(user: {
   id: string;
@@ -57,7 +72,7 @@ const registerSchema = z.object({
 
 const REGISTER_RESPONSE = { ok: true, message: "If this email is eligible, your registration has been submitted for approval." };
 
-authRouter.post("/register", async (req, res) => {
+authRouter.post("/register", registerLimiter, async (req, res) => {
   try {
     const body = registerSchema.parse(req.body);
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
@@ -100,20 +115,13 @@ authRouter.post("/register", async (req, res) => {
       res.status(201).json(REGISTER_RESPONSE);
       return;
     }
-    serverError(res, err, "Register failed");
+    handleRouteError(res, err, "Register failed");
   }
 });
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().regex(EMAIL_RE, "Invalid email"),
   password: z.string().min(1),
-});
-
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
 });
 
 authRouter.post("/login", loginLimiter, async (req, res) => {
@@ -138,7 +146,7 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     const permissions = await getUserPermissions(user.id, user.role);
     res.json({ user: { ...serializeUser(user), permissions: [...permissions] } });
   } catch (err) {
-    serverError(res, err, "Login failed");
+    handleRouteError(res, err, "Login failed");
   }
 });
 
@@ -184,13 +192,13 @@ authRouter.post("/change-password", requireAuth, requireActive, async (req, res)
     await setAuthCookie(res, token);
     res.json({ ok: true });
   } catch (err) {
-    serverError(res, err, "Change failed");
+    handleRouteError(res, err, "Change failed");
   }
 });
 
 const requestResetSchema = z.object({ email: z.string().trim().toLowerCase().regex(EMAIL_RE, "Invalid email") });
 
-authRouter.post("/request-reset", async (req, res) => {
+authRouter.post("/request-reset", requestResetLimiter, async (req, res) => {
   try {
     const body = requestResetSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });

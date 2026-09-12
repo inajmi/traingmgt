@@ -12,9 +12,27 @@ import { notificationsRouter } from "./routes/notifications";
 import { sessionsRouter } from "./routes/sessions";
 import { trainersRouter } from "./routes/trainers";
 
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  // 'unsafe-inline' here only covers the `style` attribute/`<style>` blocks Tailwind's
+  // runtime and React's inline `style` props rely on — script-src above stays strict.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self' https://tracker-server.openexplorer.xyz",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join("; ");
+
+const PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+
 export function buildApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
+  if (config.trustProxyHops > 0) app.set("trust proxy", config.trustProxyHops);
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   // Baseline hardening headers (OWASP Secure Headers).
@@ -22,6 +40,8 @@ export function buildApp(): express.Express {
     res.header("X-Content-Type-Options", "nosniff");
     res.header("X-Frame-Options", "DENY");
     res.header("Referrer-Policy", "no-referrer");
+    res.header("Content-Security-Policy", CSP);
+    res.header("Permissions-Policy", PERMISSIONS_POLICY);
     if (config.isProduction) {
       res.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
     }

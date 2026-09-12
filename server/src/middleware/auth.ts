@@ -10,12 +10,15 @@ import { getSessionTimeoutMinutes } from "../lib/settings";
 
 export const COOKIE_NAME = "tt_token";
 
+const JWT_ALGORITHM = "HS256" as const;
+
 export type AuthedUser = {
   id: string;
   email: string;
   fullName: string;
   role: "ADMIN" | "TRAINER";
   status: string;
+  mustChangePassword: boolean;
   permissions: Set<PermissionKey>;
 };
 
@@ -30,7 +33,10 @@ declare global {
 
 export async function signToken(user: { id: string; role: string; tokenVersion: number }): Promise<string> {
   const minutes = await getSessionTimeoutMinutes();
-  return jwt.sign({ sub: user.id, role: user.role, tokenVersion: user.tokenVersion }, config.jwtSecret, { expiresIn: minutes * 60 });
+  return jwt.sign({ sub: user.id, role: user.role, tokenVersion: user.tokenVersion }, config.jwtSecret, {
+    expiresIn: minutes * 60,
+    algorithm: JWT_ALGORITHM,
+  });
 }
 
 export async function setAuthCookie(res: Response, token: string): Promise<void> {
@@ -52,7 +58,7 @@ export function getPayload(req: Request): JwtPayload | null {
   const token = (req.cookies as Record<string, string> | undefined)?.[COOKIE_NAME];
   if (!token) return null;
   try {
-    return jwt.verify(token, config.jwtSecret) as JwtPayload;
+    return jwt.verify(token, config.jwtSecret, { algorithms: [JWT_ALGORITHM] }) as JwtPayload;
   } catch {
     return null;
   }
@@ -74,7 +80,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   const permissions = await getUserPermissions(user.id, user.role);
-  req.user = { id: user.id, email: user.email, fullName: user.fullName, role: user.role, status: user.status, permissions };
+  req.user = {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    status: user.status,
+    mustChangePassword: user.mustChangePassword,
+    permissions,
+  };
   next();
 }
 
@@ -91,6 +105,21 @@ export function requireActive(req: Request, res: Response, next: NextFunction): 
     } else {
       error(res, 403, "Your account is disabled");
     }
+    return;
+  }
+  next();
+}
+
+// Blocks everything except the auth endpoints themselves (login/logout/me/change-password)
+// while a temp password is still in force, so a forced rotation can't be bypassed by
+// calling the API directly instead of following the SPA's redirect.
+export function requirePasswordFresh(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    error(res, 401, "Not authenticated");
+    return;
+  }
+  if (req.user.mustChangePassword) {
+    error(res, 403, "You must change your password before continuing");
     return;
   }
   next();
