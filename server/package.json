@@ -10,7 +10,8 @@
     "db:migrate": "prisma migrate dev --name init",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "create:admin": "tsx src/scripts/create-admin.ts"
+    "create:admin": "tsx src/scripts/create-admin.ts",
+    "create:trainer-accounts": "tsx src/scripts/create-trainer-accounts.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -29,6 +30,7 @@
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
+    "@types/luxon": "^3.7.5",
     "@types/node": "^20.17.9",
     "@types/nodemailer": "^6.4.17",
     "prisma": "^5.22.0",

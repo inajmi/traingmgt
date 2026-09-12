@@ -17,6 +17,22 @@ export function buildApp(): express.Express {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  // CORS for separate client deploy.
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "https://training.openexplorer.xyz");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Credentials", "true");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(200);
+      return;
+    }
+    next();
+  });
+  // Health check endpoint for deploy.
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true, status: "healthy" });
+  });
 
   app.use("/api/auth", authRouter);
   app.use("/api/admin", adminRouter);
